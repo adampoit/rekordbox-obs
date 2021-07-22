@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,7 +37,6 @@ namespace rekordbox_obs
 			});
 
 			int windowId = 0;
-			// int midpointX = 0;
 			foreach (var possibleWindowId in possibleWindowIds)
 			{
 				RunApp("screencapture", new AppRunnerSettings
@@ -47,10 +47,7 @@ namespace rekordbox_obs
 				using var rekordboxScreenshot = Image.Load<Rgba32>("rekordbox.png");
 				var width = GetWindowWidth(rekordboxScreenshot);
 				if (width != 0)
-				{
 					windowId = possibleWindowId;
-					// midpointX = width / 2;
-				}
 			}
 			if (windowId == 0)
 				throw new InvalidOperationException("Unable to locate rekordbox window.");
@@ -61,6 +58,9 @@ namespace rekordbox_obs
 				e.Cancel = true;
 				cancellationTokenSource.Cancel();
 			};
+
+			foreach (var file in FindFiles("*.png*", "*.txt"))
+				File.Delete(file);
 
 			var currentTrack = Track.None;
 			var previousTrack = Track.None;
@@ -79,13 +79,35 @@ namespace rekordbox_obs
 					using var rekordboxScreenshot = Image.Load<Rgba32>("rekordbox.png");
 
 					using var leftSongInfo = GetSongInfoBitmap(rekordboxScreenshot, 0);
-					var leftMasterRect = GetNearestRectangle(leftSongInfo.Width * 0.93, leftSongInfo.Height * 0.55, leftSongInfo.Width * 0.07, leftSongInfo.Height * 0.45);
+					await leftSongInfo.SaveAsync("leftSongInfo.png").ConfigureAwait(false);
+					Rectangle leftMasterRect;
+					if (IsRetina)
+					{
+						// Get values for this
+						leftMasterRect = GetNearestRectangle(leftSongInfo.Width * 0.93, leftSongInfo.Height * 0.55, leftSongInfo.Width * 0.07, leftSongInfo.Height * 0.45);
+					}
+					else
+					{
+						leftMasterRect = GetNearestRectangle(leftSongInfo.Width - 50, 25, 50, 15);
+					}
 					using var leftMaster = leftSongInfo.Clone(x => x.Crop(leftMasterRect));
+					await leftMaster.SaveAsync("leftMaster.png").ConfigureAwait(false);
 					bool isLeftMaster = TrackIsMaster(leftMaster);
 
 					using var rightSongInfo = GetSongInfoBitmap(rekordboxScreenshot, rekordboxScreenshot.Width / 2);
-					var rightMasterRect = GetNearestRectangle(rightSongInfo.Width * 0.93, rightSongInfo.Height * 0.55, rightSongInfo.Width * 0.07, rightSongInfo.Height * 0.45);
+					await rightSongInfo.SaveAsync("rightSongInfo.png").ConfigureAwait(false);
+					Rectangle rightMasterRect;
+					if (IsRetina)
+					{
+						// Get values for this
+						rightMasterRect = GetNearestRectangle(leftSongInfo.Width * 0.93, leftSongInfo.Height * 0.55, leftSongInfo.Width * 0.07, leftSongInfo.Height * 0.45);
+					}
+					else
+					{
+						rightMasterRect = GetNearestRectangle(leftSongInfo.Width - 50, 25, 50, 15);
+					}
 					using var rightMaster = rightSongInfo.Clone(x => x.Crop(rightMasterRect));
+					await rightMaster.SaveAsync("rightMaster.png").ConfigureAwait(false);
 					bool isRightMaster = TrackIsMaster(rightMaster);
 
 					if (isLeftMaster)
@@ -116,6 +138,8 @@ namespace rekordbox_obs
 				File.Delete(file);
 		}
 
+		private static bool IsRetina => false;
+
 		private static int GetNearestInt(double value)
 		{
 			return (int)Math.Floor(value);
@@ -130,7 +154,17 @@ namespace rekordbox_obs
 		{
 			var trackString = $"{track.ToString().ToLower()}Song";
 
-			var songRect = GetNearestRectangle(songInfo.Width * 0.08, songInfo.Height * 0.1, songInfo.Width - songInfo.Width * 0.24, songInfo.Height * 0.5);
+			Rectangle songRect;
+			if (IsRetina)
+			{
+				// Get values for this
+				songRect = GetNearestRectangle(songInfo.Width * 0.07, songInfo.Height * 0.1, songInfo.Width - songInfo.Width * 0.24, songInfo.Height * 0.5);
+			}
+			else
+			{
+				songRect = GetNearestRectangle(55, songInfo.Height * 0.1, songInfo.Width - 170, songInfo.Height * 0.5);
+			}
+
 			using var song = songInfo.Clone(x => x.Crop(songRect));
 			var songImageFilename = $"{trackString}.png";
 			await song.SaveAsync(songImageFilename).ConfigureAwait(false);
@@ -146,30 +180,37 @@ namespace rekordbox_obs
 				if (songName == "Not Loaded.")
 					return;
 
-				RunApp("fzf", new AppRunnerSettings
+				songName = songName.Replace("...", "");
+				while (songFilename == null && songName != String.Empty)
 				{
-					WorkingDirectory = EDMDirectory,
-					Arguments = new[] { "--filter", songName.Replace("...", "") },
-					HandleOutputLine = (line) => songFilename = line,
-				});
+					try
+					{
+						RunApp("fzf", new AppRunnerSettings
+						{
+							WorkingDirectory = EDMDirectory,
+							Arguments = new[] { "--filter", songName },
+							HandleOutputLine = (line) => songFilename ??= line,
+						});
+					}
+					catch (BuildException)
+					{
+						songName = RemoveShortestWord(songName);
+					}
+				}
 			}
 
-			try
+			RunApp("convert", new AppRunnerSettings
 			{
-				RunTesseractAndFzf();
-			}
-			catch (BuildException)
-			{
-				RunApp("convert", new AppRunnerSettings
-				{
-					Arguments = new[] { songImageFilename, "-filter", "Catrom", "-resize", "600%", songImageFilename },
-				});
+				Arguments = new[] { songImageFilename, "-filter", "Catrom", "-resize", "600%", songImageFilename },
+			});
 
-				RunTesseractAndFzf();
-			}
+			RunTesseractAndFzf();
 
 			if (songFilename == null)
+			{
+				Console.WriteLine($"Unable to find song for {track}!");
 				return;
+			}
 
 			var songTags = TagLib.File.Create(System.IO.Path.Combine(EDMDirectory, songFilename));
 
@@ -219,7 +260,7 @@ namespace rekordbox_obs
 					.DrawText(new DrawingOptions(), isPlayingText, boldFont, fontColor, new PointF(outerPadding + innerPadding, innerPadding))
 					.DrawText(drawingOptions, title, boldFont, fontColor, new PointF(coverWithPadding, topLine))
 					.DrawText(drawingOptions, artists, font, fontColor, new PointF(coverWithPadding, topLine + titleSize.Height))
-					.DrawText(drawingOptions, songTags.Tag.Publisher, font, fontColor, new PointF(coverWithPadding, topLine + titleSize.Height + artistsSize.Height)));
+					.DrawText(drawingOptions, songTags.Tag.Publisher ?? "", font, fontColor, new PointF(coverWithPadding, topLine + titleSize.Height + artistsSize.Height)));
 			}
 			else if (track == Track.Right)
 			{
@@ -233,10 +274,27 @@ namespace rekordbox_obs
 					.DrawText(new DrawingOptions(), isPlayingText, boldFont, fontColor, new PointF(maxSongWidth - outerPadding - innerPadding - isPlayingTextSize.Width, innerPadding))
 					.DrawText(drawingOptions, title, boldFont, fontColor, new PointF(gradientBlend, topLine))
 					.DrawText(drawingOptions, artists, font, fontColor, new PointF(gradientBlend, topLine + titleSize.Height))
-					.DrawText(drawingOptions, songTags.Tag.Publisher, font, fontColor, new PointF(gradientBlend, topLine + titleSize.Height + artistsSize.Height)));
+					.DrawText(drawingOptions, songTags.Tag.Publisher ?? "", font, fontColor, new PointF(gradientBlend, topLine + titleSize.Height + artistsSize.Height)));
 			}
 
 			await songMetadata.SaveAsync($"{trackString}Metadata.png").ConfigureAwait(false);
+		}
+
+		private static string RemoveShortestWord(string input)
+		{
+			var inputElements = input.Split(' ');
+			var shortestElement = inputElements.OrderBy(x => x.Length).First();
+
+			var resultBuilder = new StringBuilder();
+			foreach (var element in inputElements)
+			{
+				if (element == shortestElement)
+					continue;
+
+				resultBuilder.Append(element + " ");
+			}
+
+			return resultBuilder.ToString().Trim();
 		}
 
 		private static bool TrackIsMaster(Image<Rgba32> bitmap)
