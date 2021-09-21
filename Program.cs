@@ -84,7 +84,7 @@ namespace rekordbox_obs
 					if (IsRetina)
 					{
 						// Get values for this
-						leftMasterRect = GetNearestRectangle(leftSongInfo.Width * 0.93, leftSongInfo.Height * 0.55, leftSongInfo.Width * 0.07, leftSongInfo.Height * 0.45);
+						leftMasterRect = GetNearestRectangle(leftSongInfo.Width - 100, 50, 100, 30);
 					}
 					else
 					{
@@ -100,11 +100,11 @@ namespace rekordbox_obs
 					if (IsRetina)
 					{
 						// Get values for this
-						rightMasterRect = GetNearestRectangle(leftSongInfo.Width * 0.93, leftSongInfo.Height * 0.55, leftSongInfo.Width * 0.07, leftSongInfo.Height * 0.45);
+						rightMasterRect = GetNearestRectangle(rightSongInfo.Width - 100, 50, 100, 30);
 					}
 					else
 					{
-						rightMasterRect = GetNearestRectangle(leftSongInfo.Width - 50, 25, 50, 15);
+						rightMasterRect = GetNearestRectangle(rightSongInfo.Width - 50, 25, 50, 15);
 					}
 					using var rightMaster = rightSongInfo.Clone(x => x.Crop(rightMasterRect));
 					await rightMaster.SaveAsync("rightMaster.png").ConfigureAwait(false);
@@ -138,7 +138,7 @@ namespace rekordbox_obs
 				File.Delete(file);
 		}
 
-		private static bool IsRetina => false;
+		private static bool IsRetina => true;
 
 		private static int GetNearestInt(double value)
 		{
@@ -158,7 +158,7 @@ namespace rekordbox_obs
 			if (IsRetina)
 			{
 				// Get values for this
-				songRect = GetNearestRectangle(songInfo.Width * 0.07, songInfo.Height * 0.1, songInfo.Width - songInfo.Width * 0.24, songInfo.Height * 0.5);
+				songRect = GetNearestRectangle(110, songInfo.Height * 0.1, songInfo.Width - 340, songInfo.Height * 0.5);
 			}
 			else
 			{
@@ -199,10 +199,13 @@ namespace rekordbox_obs
 				}
 			}
 
-			RunApp("convert", new AppRunnerSettings
+			if (!IsRetina)
 			{
-				Arguments = new[] { songImageFilename, "-filter", "Catrom", "-resize", "600%", songImageFilename },
-			});
+				RunApp("convert", new AppRunnerSettings
+				{
+					Arguments = new[] { songImageFilename, "-filter", "Catrom", "-resize", "600%", songImageFilename },
+				});
+			}
 
 			RunTesseractAndFzf();
 
@@ -258,8 +261,8 @@ namespace rekordbox_obs
 					.DrawImage(cover, new Point(outerPadding, topLine), 1.0f)
 					.Fill(new SolidBrush(Color.Red), new RectangleF(outerPadding, 0, isPlayingTextSize.Width + outerPadding, isPlayingTextSize.Height + outerPadding))
 					.DrawText(new DrawingOptions(), isPlayingText, boldFont, fontColor, new PointF(outerPadding + innerPadding, innerPadding))
-					.DrawText(drawingOptions, title, boldFont, fontColor, new PointF(coverWithPadding, topLine))
-					.DrawText(drawingOptions, artists, font, fontColor, new PointF(coverWithPadding, topLine + titleSize.Height))
+					.DrawText(drawingOptions, title ?? "", boldFont, fontColor, new PointF(coverWithPadding, topLine))
+					.DrawText(drawingOptions, artists ?? "", font, fontColor, new PointF(coverWithPadding, topLine + titleSize.Height))
 					.DrawText(drawingOptions, songTags.Tag.Publisher ?? "", font, fontColor, new PointF(coverWithPadding, topLine + titleSize.Height + artistsSize.Height)));
 			}
 			else if (track == Track.Right)
@@ -272,8 +275,8 @@ namespace rekordbox_obs
 					.DrawImage(cover, new Point(maxSongWidth - coverSize - outerPadding, topLine), 1.0f)
 					.Fill(new SolidBrush(Color.Red), new RectangleF(maxSongWidth - outerPadding - innerPadding * 2 - isPlayingTextSize.Width, 0, isPlayingTextSize.Width + outerPadding, isPlayingTextSize.Height + outerPadding))
 					.DrawText(new DrawingOptions(), isPlayingText, boldFont, fontColor, new PointF(maxSongWidth - outerPadding - innerPadding - isPlayingTextSize.Width, innerPadding))
-					.DrawText(drawingOptions, title, boldFont, fontColor, new PointF(gradientBlend, topLine))
-					.DrawText(drawingOptions, artists, font, fontColor, new PointF(gradientBlend, topLine + titleSize.Height))
+					.DrawText(drawingOptions, title ?? "", boldFont, fontColor, new PointF(gradientBlend, topLine))
+					.DrawText(drawingOptions, artists ?? "", font, fontColor, new PointF(gradientBlend, topLine + titleSize.Height))
 					.DrawText(drawingOptions, songTags.Tag.Publisher ?? "", font, fontColor, new PointF(gradientBlend, topLine + titleSize.Height + artistsSize.Height)));
 			}
 
