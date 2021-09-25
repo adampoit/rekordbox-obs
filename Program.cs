@@ -174,7 +174,7 @@ namespace rekordbox_obs
 			{
 				RunApp("tesseract", new AppRunnerSettings
 				{
-					Arguments = new[] { songImageFilename, trackString },
+					Arguments = new[] { "--psm", "7", songImageFilename, trackString },
 				});
 				var songName = File.ReadAllLines($"{trackString}.txt").First();
 				if (songName == "Not Loaded.")
@@ -198,6 +198,11 @@ namespace rekordbox_obs
 					}
 				}
 			}
+
+			RunApp("convert", new AppRunnerSettings
+			{
+				Arguments = new[] { songImageFilename, "-channel", "RGB", "-negate", songImageFilename },
+			});
 
 			if (!IsRetina)
 			{
