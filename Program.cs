@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Faithlife.Build;
 using Faithlife.Utility;
+using FuzzySharp;
 using SixLabors.Fonts;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
@@ -23,6 +24,19 @@ namespace rekordbox_obs
 		static async Task Main(string[] args)
 		{
 			string EDMDirectory = "/Users/adam.poit/Music/EDM";
+
+			var songTagsLookup = new Dictionary<string, TagLib.File>();
+			foreach (var songFile in Directory.EnumerateFiles(EDMDirectory, "*.*", SearchOption.AllDirectories))
+			{
+				try
+				{
+					var songTags = TagLib.File.Create(songFile);
+					songTagsLookup.Add($"{songTags.Tag.Performers.Join(",")} - {songTags.Tag.Title}", songTags);
+				}
+				catch (TagLib.UnsupportedFormatException)
+				{
+				}
+			}
 
 			var possibleWindowIds = new List<int>();
 			RunApp("bash", new AppRunnerSettings
@@ -123,8 +137,8 @@ namespace rekordbox_obs
 					{
 						previousTrack = currentTrack;
 
-						await ProcessTrack(EDMDirectory, Track.Left, isLeftMaster, leftSongInfo).ConfigureAwait(false);
-						await ProcessTrack(EDMDirectory, Track.Right, isRightMaster, rightSongInfo).ConfigureAwait(false);
+						await ProcessTrack(songTagsLookup, Track.Left, isLeftMaster, leftSongInfo).ConfigureAwait(false);
+						await ProcessTrack(songTagsLookup, Track.Right, isRightMaster, rightSongInfo).ConfigureAwait(false);
 					}
 				}
 				catch (Exception)
@@ -150,7 +164,7 @@ namespace rekordbox_obs
 			return new Rectangle(GetNearestInt(x), GetNearestInt(y), GetNearestInt(width), GetNearestInt(height));
 		}
 
-		private static async Task ProcessTrack(string EDMDirectory, Track track, bool isTrackMaster, Image<Rgba32> songInfo)
+		private static async Task ProcessTrack(Dictionary<string, TagLib.File> songTagsLookup, Track track, bool isTrackMaster, Image<Rgba32> songInfo)
 		{
 			var trackString = $"{track.ToString().ToLower()}Song";
 
@@ -158,45 +172,33 @@ namespace rekordbox_obs
 			if (IsRetina)
 			{
 				// Get values for this
-				songRect = GetNearestRectangle(110, songInfo.Height * 0.1, songInfo.Width - 340, songInfo.Height * 0.5);
+				songRect = GetNearestRectangle(110, songInfo.Height * 0.1, songInfo.Width - 340, songInfo.Height * 0.9);
 			}
 			else
 			{
-				songRect = GetNearestRectangle(55, songInfo.Height * 0.1, songInfo.Width - 170, songInfo.Height * 0.5);
+				songRect = GetNearestRectangle(55, songInfo.Height * 0.1, songInfo.Width - 170, songInfo.Height * 0.9);
 			}
 
 			using var song = songInfo.Clone(x => x.Crop(songRect));
 			var songImageFilename = $"{trackString}.png";
 			await song.SaveAsync(songImageFilename).ConfigureAwait(false);
 
-			string songFilename = null;
-			void RunTesseractAndFzf()
+			string RunTesseractAndGetSongName()
 			{
 				RunApp("tesseract", new AppRunnerSettings
 				{
-					Arguments = new[] { "--psm", "7", songImageFilename, trackString },
+					Arguments = new[] { "--psm", "3", songImageFilename, trackString },
 				});
-				var songName = File.ReadAllLines($"{trackString}.txt").First();
-				if (songName == "Not Loaded.")
-					return;
-
+				var songName = File.ReadAllText($"{trackString}.txt");
 				songName = songName.Replace("...", "");
-				while (songFilename == null && songName != String.Empty)
-				{
-					try
-					{
-						RunApp("fzf", new AppRunnerSettings
-						{
-							WorkingDirectory = EDMDirectory,
-							Arguments = new[] { "--filter", songName },
-							HandleOutputLine = (line) => songFilename ??= line,
-						});
-					}
-					catch (BuildException)
-					{
-						songName = RemoveShortestWord(songName);
-					}
-				}
+
+				var match = Regex.Match(songName, "(.*)\n(.*) \\d+\\.\\d\\d", RegexOptions.Multiline);
+				if (!match.Success)
+					return null;
+
+				var songMatch = Process.ExtractOne($"{match.Groups[1].Value} - {match.Groups[0].Value}", songTagsLookup.Keys);
+
+				return songMatch.Value;
 			}
 
 			RunApp("convert", new AppRunnerSettings
@@ -212,15 +214,14 @@ namespace rekordbox_obs
 				});
 			}
 
-			RunTesseractAndFzf();
-
-			if (songFilename == null)
+			var songName = RunTesseractAndGetSongName();
+			if (songName == null)
 			{
 				Console.WriteLine($"Unable to find song for {track}!");
 				return;
 			}
 
-			var songTags = TagLib.File.Create(System.IO.Path.Combine(EDMDirectory, songFilename));
+			var songTags = songTagsLookup[songName];
 
 			// Customize these
 			var maxSongWidth = 960;
